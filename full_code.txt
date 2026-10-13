@@ -1,0 +1,794 @@
+
+
+=== internal/database/connection.go ===
+
+
+
+=== internal/model/order.go ===
+
+
+
+=== internal/model/master_class.go ===
+
+
+
+=== internal/model/product.go ===
+
+
+
+=== internal/model/order_item.go ===
+
+
+
+=== internal/repository/order.go ===
+
+
+
+=== internal/repository/master_class.go ===
+
+
+
+=== internal/repository/product.go ===
+
+
+
+=== internal/service/order.go ===
+
+
+
+=== internal/service/master_class.go ===
+
+
+
+=== internal/service/product.go ===
+
+
+
+=== internal/handler/handler.go ===
+
+
+
+=== cmd/server/main.go ===
+
+
+
+=== migrations/000001_init.up.sql ===
+
+
+
+=== migrations/000001_init.down.sql ===
+
+package database
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func Connect(ctx context.Context, connString string) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		return nil, err
+	}
+
+	err = pool.Ping(ctx)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+package model
+
+import "time"
+
+type Order struct {
+	ID         int       `json:"id"`
+	UserID     int       `json:"user_id"`
+	Status     string    `json:"status"`
+	TotalPrice float64   `json:"total_price"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CreateOrderRequest struct {
+	UserID int               `json:"user_id"`
+	Items  []CreateOrderItem `json:"items"`
+}
+
+type CreateOrderItem struct {
+	ProductID int `json:"product_id"`
+	Quantity  int `json:"quantity"`
+}
+package model
+
+type MasterClass struct {
+	ID          int    `json:"id"`
+	ProductID   int    `json:"product_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	VideoURL    string `json:"video_url"`
+}
+package model
+
+type Product struct {
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Price       float64 `json:"price"`
+	ImageURL    string  `json:"image_url"`
+}
+package model
+
+type OrderItem struct {
+	ID        int     `json:"id"`
+	OrderID   int     `json:"order_id"`
+	ProductID int     `json:"product_id"`
+	Quantity  int     `json:"quantity"`
+	Price     float64 `json:"price"`
+}
+package repository
+
+import (
+	"Confetki/internal/model"
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type OrderRepository struct {
+	db *pgxpool.Pool
+}
+
+func NewOrderRepository(db *pgxpool.Pool) *OrderRepository {
+	return &OrderRepository{
+		db: db,
+	}
+}
+
+func (o *OrderRepository) Create(ctx context.Context, order model.Order) (model.Order, error) {
+	var createdOrder model.Order
+
+	err := o.db.QueryRow(ctx, `insert into orders (user_id, status, total_price)
+		values ($1, $2, $3)
+		returning id, user_id, status, total_price, created_at`,
+		order.UserID, order.Status, order.TotalPrice,
+	).Scan(
+		&createdOrder.ID,
+		&createdOrder.UserID,
+		&createdOrder.Status,
+		&createdOrder.TotalPrice,
+		&createdOrder.CreatedAt,
+	)
+
+	if err != nil {
+		return model.Order{}, err
+	}
+
+	return createdOrder, nil
+}
+
+func (o *OrderRepository) CreateItem(ctx context.Context, item model.OrderItem) (model.OrderItem, error) {
+	var createdItem model.OrderItem
+
+	err := o.db.QueryRow(ctx,
+		`insert into order_items (order_id, product_id, quantity, price)
+	values ($1, $2, $3, $4)
+	returning id, order_id, product_id, quantity, price`,
+		item.OrderID,
+		item.ProductID,
+		item.Quantity,
+		item.Price,
+	).Scan(
+		&createdItem.ID,
+		&createdItem.OrderID,
+		&createdItem.ProductID,
+		&createdItem.Quantity,
+		&createdItem.Price)
+
+	if err != nil {
+		return model.OrderItem{}, err
+	}
+
+	return createdItem, nil
+}
+package repository
+
+import (
+	"Confetki/internal/model"
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type MasterClassRepository struct {
+	db *pgxpool.Pool
+}
+
+func NewMasterClassRepository(db *pgxpool.Pool) *MasterClassRepository {
+	return &MasterClassRepository{
+		db: db,
+	}
+}
+
+func (r *MasterClassRepository) Create(ctx context.Context, masterClass model.MasterClass) (model.MasterClass, error) {
+	var createdMasterClass model.MasterClass
+
+	err := r.db.QueryRow(
+		ctx,
+		`INSERT INTO  master_classes (title, description, product_id, video_url)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, title, description, product_id, video_url`,
+		masterClass.Title,
+		masterClass.Description,
+		masterClass.ProductID,
+		masterClass.VideoURL,
+	).Scan(
+		&createdMasterClass.ID,
+		&createdMasterClass.Title,
+		&createdMasterClass.Description,
+		&createdMasterClass.ProductID,
+		&createdMasterClass.VideoURL,
+	)
+
+	if err != nil {
+		return model.MasterClass{}, err
+	}
+
+	return createdMasterClass, nil
+}
+
+func (r *MasterClassRepository) GetByProductID(ctx context.Context, productID int) (model.MasterClass, error) {
+	var masterClass model.MasterClass
+
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT id, title, description, product_id, video_url
+		FROM master_classes
+		WHERE product_id = $1`,
+		productID,
+	).Scan(
+		&masterClass.ID,
+		&masterClass.Title,
+		&masterClass.Description,
+		&masterClass.ProductID,
+		&masterClass.VideoURL,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.MasterClass{}, ErrProductNotFound
+		}
+
+		return model.MasterClass{}, err
+	}
+
+	return masterClass, nil
+}
+package repository
+
+import (
+	"Confetki/internal/model"
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var ErrProductNotFound = errors.New("product not found")
+
+type ProductRepository struct {
+	db *pgxpool.Pool
+}
+
+func NewProductRepository(db *pgxpool.Pool) *ProductRepository {
+	return &ProductRepository{
+		db: db,
+	}
+}
+
+func (r *ProductRepository) GetAll(ctx context.Context) ([]model.Product, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`SELECT id, name, description, price, image_url
+	FROM products
+	ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+	var products []model.Product
+	for rows.Next() {
+		var product model.Product
+		err := rows.Scan(
+			&product.ID,
+			&product.Name,
+			&product.Description,
+			&product.Price,
+			&product.ImageURL,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		products = append(products, product)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+func (r *ProductRepository) GetByID(ctx context.Context, id int) (model.Product, error) {
+	var product model.Product
+
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT * FROM products
+		WHERE id = $1;`,
+		id,
+	).Scan(
+		&product.ID,
+		&product.Name,
+		&product.Description,
+		&product.Price,
+		&product.ImageURL,
+	)
+	if err != nil {
+		return model.Product{}, err
+	}
+
+	return product, nil
+}
+
+func (r *ProductRepository) Create(ctx context.Context, product model.Product) (model.Product, error) {
+	var createdProduct model.Product
+
+	err := r.db.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description, price, image_url)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, name, description, price, image_url`,
+		product.Name,
+		product.Description,
+		product.Price,
+		product.ImageURL,
+	).Scan(
+		&createdProduct.ID,
+		&createdProduct.Name,
+		&createdProduct.Description,
+		&createdProduct.Price,
+		&createdProduct.ImageURL,
+	)
+
+	if err != nil {
+		return model.Product{}, err
+	}
+
+	return createdProduct, nil
+}
+
+func (r *ProductRepository) Delete(ctx context.Context, id int) error {
+	sqlQuery := `
+	DELETE FROM products
+	WHERE id = $1`
+
+	result, err := r.db.Exec(ctx, sqlQuery, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrProductNotFound
+	}
+
+	return nil
+}
+package service
+
+import (
+	"Confetki/internal/model"
+	"context"
+)
+
+type OrderRepository interface {
+	Create(ctx context.Context, order model.Order) (model.Order, error)
+	CreateItem(ctx context.Context, item model.OrderItem) (model.OrderItem, error)
+}
+
+type OrderService struct {
+	repository OrderRepository
+}
+
+func NewOrderService(repository OrderRepository) *OrderService {
+	return &OrderService{
+		repository: repository,
+	}
+}
+
+func (s *OrderService) CreateOrder(ctx context.Context, request model.CreateOrderRequest) (model.Order, error) {
+	order := model.Order{
+		UserID: request.UserID,
+		Status: "new",
+	}
+
+	createdOrder, err := s.repository.Create(ctx, order)
+	if err != nil {
+		return model.Order{}, err
+	}
+
+	for _, item := range request.Items {
+		orderItem := model.OrderItem{
+			OrderID: createdOrder.ID,
+			ProductID: item.ProductID,
+			Quantity: item.Quantity,
+		}
+
+		_, err := s.repository.CreateItem(ctx, orderItem)
+		if err != nil {
+			return model.Order{}, err 
+		}
+	}
+	
+	return createdOrder, nil
+
+}
+package service
+
+import (
+	"Confetki/internal/model"
+	"context"
+)
+
+type MasterClassRepository interface {
+	GetByProductID(ctx context.Context, productID int) (model.MasterClass, error)
+	Create(ctx context.Context, masterClass model.MasterClass) (model.MasterClass, error)
+}
+
+type MasterClassService struct {
+	repository MasterClassRepository
+}
+
+func NewMasterClassService(repository MasterClassRepository) *MasterClassService {
+	return &MasterClassService{
+		repository: repository,
+	}
+}
+
+func (s *MasterClassService) GetMasterClassByProductID(ctx context.Context, product_id int) (model.MasterClass, error) {
+	return s.repository.GetByProductID(ctx, product_id)
+}
+
+func (s *MasterClassService) CreateMasterClass(ctx context.Context, masterClass model.MasterClass) (model.MasterClass, error) {
+	return s.repository.Create(ctx, masterClass)
+}
+package service
+
+import (
+	"Confetki/internal/model"
+	"context"
+)
+
+type ProductRepository interface {
+	GetAll(ctx context.Context) ([]model.Product, error)
+	GetByID(ctx context.Context, id int) (model.Product, error)
+	Create(ctx context.Context, product model.Product) (model.Product, error)
+	Delete(ctx context.Context, id int) error
+}
+
+type ProductService struct {
+	repository ProductRepository
+}
+
+func NewProductService(repository ProductRepository) *ProductService {
+	return &ProductService{
+		repository: repository,
+	}
+}
+
+func (s *ProductService) GetAllProducts(ctx context.Context) ([]model.Product, error) {
+	return s.repository.GetAll(ctx)
+}
+
+func (s *ProductService) GetProductByID(ctx context.Context, id int) (model.Product, error) {
+	return s.repository.GetByID(ctx, id)
+}
+
+func (s *ProductService) CreateProduct(ctx context.Context, product model.Product) (model.Product, error) {
+	return s.repository.Create(ctx, product)
+}
+
+func (s *ProductService) DeleteProduct(ctx context.Context, id int) error {
+	return s.repository.Delete(ctx, id)
+}
+package handler
+
+import (
+	"Confetki/internal/model"
+	"Confetki/internal/repository"
+	"Confetki/internal/service"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+)
+
+type Handler struct {
+	productService     *service.ProductService
+	masterClassService *service.MasterClassService
+	orderService       *service.OrderService
+}
+
+func NewHandler(productService *service.ProductService, masterClassService *service.MasterClassService, orderService *service.OrderService) *Handler {
+	return &Handler{
+		productService:     productService,
+		masterClassService: masterClassService,
+		orderService:       orderService,
+	}
+}
+
+func Home(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, " server is running")
+}
+
+func (h *Handler) GetProducts(w http.ResponseWriter, r *http.Request) {
+	products, err := h.productService.GetAllProducts(r.Context())
+	if err != nil {
+
+		http.Error(w, "failed to get products", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(products)
+
+}
+
+func (h *Handler) GetProductById(w http.ResponseWriter, r *http.Request) {
+	idString := chi.URLParam(r, "id")
+
+	id, err := strconv.Atoi(idString)
+	if err != nil {
+		http.Error(w, "invalid product id", http.StatusBadRequest)
+		return
+	}
+
+	product, err := h.productService.GetProductByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "product not found", http.StatusNotFound)
+			return
+		}
+
+		http.Error(w, "failed to get product", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(product)
+
+}
+
+func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
+	var product model.Product
+
+	err := json.NewDecoder(r.Body).Decode(&product)
+	if err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	createdProduct, err := h.productService.CreateProduct(r.Context(), product)
+	if err != nil {
+		http.Error(w, "failed to create product", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(createdProduct)
+}
+
+func (h *Handler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
+	idString := chi.URLParam(r, "id")
+
+	id, err := strconv.Atoi(idString)
+	if err != nil {
+		http.Error(w, "invalid product id", http.StatusBadRequest)
+		return
+	}
+
+	err = h.productService.DeleteProduct(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrProductNotFound) {
+			http.Error(w, "product not found", http.StatusNotFound)
+			return
+		}
+
+		http.Error(w, "failed to delete product", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) CreateMasterClass(w http.ResponseWriter, r *http.Request) {
+	var masterClass model.MasterClass
+
+	err := json.NewDecoder(r.Body).Decode(&masterClass)
+	if err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	createdMasterClass, err := h.masterClassService.CreateMasterClass(r.Context(), masterClass)
+	if err != nil {
+		http.Error(w, "failed to create masteClass", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application'json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(createdMasterClass)
+}
+
+func (h *Handler) GetMasterClass(w http.ResponseWriter, r *http.Request) {
+	idString := chi.URLParam(r, "id")
+
+	id, err := strconv.Atoi(idString)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	masterClass, err := h.masterClassService.GetMasterClassByProductID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrProductNotFound) {
+			http.Error(w, "masterClass not found", http.StatusNotFound)
+			return
+		}
+
+		http.Error(w, "failed to get masterClass", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-type", "application/json")
+	json.NewEncoder(w).Encode(masterClass)
+}
+
+func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
+	var request model.CreateOrderRequest
+
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	createdOrder, err := h.orderService.CreateOrder(r.Context(), request)
+	if err != nil {
+		http.Error(w, "failed to create order", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	json.NewEncoder(w).Encode(createdOrder)
+}
+package main
+
+import (
+	"Confetki/internal/database"
+	"Confetki/internal/handler"
+	"Confetki/internal/repository"
+	"Confetki/internal/service"
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func main() {
+	ctx := context.Background()
+
+	connString := os.Getenv("CONN_STRING")
+
+	pool, err := database.Connect(ctx, connString)
+	if err != nil {
+		fmt.Println("databse failed connection: ", err)
+		return
+	}
+	defer pool.Close()
+	fmt.Println("database connection")
+
+	productRepository := repository.NewProductRepository(pool)
+	masterClassRepository := repository.NewMasterClassRepository(pool)
+	productService := service.NewProductService(productRepository)
+	masterClassService := service.NewMasterClassService(masterClassRepository)
+	orderRepository := repository.NewOrderRepository(pool)
+	orderService := service.NewOrderService(orderRepository)
+
+	appHandler := handler.NewHandler(productService, masterClassService, orderService)
+
+	r := chi.NewRouter()
+
+	r.Get("/", handler.Home)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Route("/products", func(r chi.Router) {
+			r.Get("/", appHandler.GetProducts)
+			r.Get("/{id}", appHandler.GetProductById)
+			r.Post("/", appHandler.CreateProduct)
+			r.Get("/{id}/master-class", appHandler.GetMasterClass)
+			r.Delete("/{id}", appHandler.DeleteProduct)
+		})
+
+		r.Post("/master-classes", appHandler.CreateMasterClass)
+		r.Post("/orders", appHandler.CreateOrder)
+	})
+
+	fmt.Printf("server is running\n")
+
+	err = http.ListenAndServe(":8080", r)
+	if err != nil {
+		fmt.Print(err)
+	}
+}
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    price NUMERIC(6, 2) NOT NULL,
+    image_url TEXT
+);
+
+CREATE TABLE master_classes (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL UNIQUE REFERENCES products(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    video_url TEXT NOT NULL
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL,
+    total_price NUMERIC(6, 2) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    price NUMERIC(6, 2) NOT NULL
+);DROP TABLE order_items
+DROP TABLE orders
+DROP TABLE master_classes
+DROP TABLE products
+DROP TABLE users
