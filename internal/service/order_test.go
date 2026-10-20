@@ -25,7 +25,7 @@ func (m *mockOrderRepo) GetOrderByID(ctx context.Context, id int) (model.Order, 
 }
 
 func (m *mockOrderRepo) CreateFullOrder(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) {
-	if m.createFullOrderFn != nil { // ИСПРАВЛЕНО
+	if m.createFullOrderFn != nil {
 		return m.createFullOrderFn(ctx, order, items)
 	}
 	return model.Order{}, nil
@@ -44,121 +44,130 @@ func (mp *mockProductRepo) GetByID(ctx context.Context, id int) (model.Product, 
 	return model.Product{}, nil
 }
 
-// 2. Тесты через t.Run
 func TestOrderService_GetOrderByID(t *testing.T) {
-	t.Run("invalid id: should return ErrInvalidID without touching repo", func(t *testing.T) {
-		svc := NewOrderService(&mockOrderRepo{}, &mockProductRepo{})
-
-		_, err := svc.GetOrderByID(context.Background(), -1)
-
-		if !errors.Is(err, ErrInvalidID) {
-			t.Errorf("got %v, want %v", err, ErrInvalidID)
-		}
-	})
-
-	t.Run("not found: repo returns pgx.ErrNoRows -> service returns ErrOrderNotFound", func(t *testing.T) {
-		repo := &mockOrderRepo{
-			getOrderByIDFn: func(ctx context.Context, id int) (model.Order, error) {
+	tests := []struct {
+		name       string
+		orderID    int
+		mockRepoFn func(ctx context.Context, id int) (model.Order, error)
+		wantErr    error
+		wantOrder  model.Order
+	}{
+		{
+			name:       "invalid id: negative",
+			orderID:    -1,
+			mockRepoFn: nil,
+			wantErr:    ErrInvalidID,
+			wantOrder:  model.Order{},
+		},
+		{
+			name:    "not found in database",
+			orderID: 42,
+			mockRepoFn: func(ctx context.Context, id int) (model.Order, error) {
 				return model.Order{}, pgx.ErrNoRows
 			},
-		}
-		svc := NewOrderService(repo, &mockProductRepo{})
-
-		_, err := svc.GetOrderByID(context.Background(), 42)
-
-		if !errors.Is(err, ErrOrderNotFound) {
-			t.Errorf("got %v, want %v", err, ErrOrderNotFound)
-		}
-	})
-
-	t.Run("success: returns order from repo", func(t *testing.T) {
-		expectedOrder := model.Order{
-			ID:         42,
-			UserID:     1,
-			Status:     "new",
-			TotalPrice: 500,
-		}
-
-		repo := &mockOrderRepo{
-			getOrderByIDFn: func(ctx context.Context, id int) (model.Order, error) {
-				return expectedOrder, nil
+			wantErr:   ErrOrderNotFound,
+			wantOrder: model.Order{},
+		},
+		{
+			name:    "success: order found",
+			orderID: 42,
+			mockRepoFn: func(ctx context.Context, id int) (model.Order, error) {
+				return model.Order{ID: 42, TotalPrice: 500}, nil
 			},
-		}
-		svc := NewOrderService(repo, &mockProductRepo{})
+			wantErr:   nil,
+			wantOrder: model.Order{ID: 42, TotalPrice: 500},
+		},
+	}
 
-		order, err := svc.GetOrderByID(context.Background(), 42)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orderRepo := &mockOrderRepo{getOrderByIDFn: tt.mockRepoFn}
+			svc := NewOrderService(orderRepo, &mockProductRepo{})
 
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if order.ID != expectedOrder.ID || order.TotalPrice != expectedOrder.TotalPrice {
-			t.Errorf("got %+v, want %+v", order, expectedOrder)
-		}
-	})
+			order, err := svc.GetOrderByID(context.Background(), tt.orderID)
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
+			}
+
+			if tt.wantErr == nil && order.ID != tt.wantOrder.ID {
+				t.Errorf("expected order ID %d, got %d", tt.wantOrder.ID, order.ID)
+			}
+		})
+	}
 }
 
 func TestOrderService_CreateOrder(t *testing.T) {
-	t.Run("not enough product: repo returns ErrNotEnoughProduct", func(t *testing.T) {
-		prodRepo := &mockProductRepo{
-			getByIDFn: func(ctx context.Context, id int) (model.Product, error) {
+	tests := []struct {
+		name            string
+		req             model.CreateOrderRequest                                                                   // Входные данные
+		mockProdRepoFn  func(ctx context.Context, id int) (model.Product, error)                                   // Поведение репозитория товаров
+		mockOrderRepoFn func(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) // Поведение репозитория заказов
+		wantErr         error
+		wantOrder       model.Order
+	}{
+		{
+			name: "not enough product",
+			req: model.CreateOrderRequest{
+				UserID: 1,
+				Items: []model.CreateOrderItem{
+					{ProductID: 2, Quantity: 5},
+				},
+			},
+			mockProdRepoFn: func(ctx context.Context, id int) (model.Product, error) {
 				return model.Product{ID: 2, Price: 100}, nil
 			},
-		}
-
-		orderRepo := &mockOrderRepo{
-			createFullOrderFn: func(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) {
+			mockOrderRepoFn: func(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) {
 				return model.Order{}, repository.ErrNotEnoughProduct
 			},
-		}
-
-		req := model.CreateOrderRequest{
-			UserID: 1,
-			Items: []model.CreateOrderItem{
-				{ProductID: 2, Quantity: 5},
+			wantErr:   repository.ErrNotEnoughProduct,
+			wantOrder: model.Order{},
+		},
+		{
+			name: "success",
+			req: model.CreateOrderRequest{
+				UserID: 9,
+				Items: []model.CreateOrderItem{
+					{ProductID: 2, Quantity: 2},
+				},
 			},
-		}
-		svc := NewOrderService(orderRepo, prodRepo)
-		_, err := svc.CreateOrder(context.Background(), req)
-
-		if !errors.Is(err, repository.ErrNotEnoughProduct) {
-			t.Errorf("got %v, want %v", err, repository.ErrNotEnoughProduct)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		expectedOrder := model.Order{
-			ID:         1,
-			UserID:     9,
-			TotalPrice: 500,
-			Status:     "new",
-		}
-		prodRepo := &mockProductRepo{
-			getByIDFn: func(ctx context.Context, id int) (model.Product, error) {
+			mockProdRepoFn: func(ctx context.Context, id int) (model.Product, error) {
 				return model.Product{ID: 2, Price: 250}, nil
 			},
-		}
-
-		orderRepo := &mockOrderRepo{
-			createFullOrderFn: func(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) {
-				return expectedOrder, nil
+			mockOrderRepoFn: func(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error) {
+				return model.Order{
+					ID:         1,
+					UserID:     9,
+					TotalPrice: 500,
+					Status:     "new",
+				}, nil
 			},
-		}
-
-		req := model.CreateOrderRequest{
-			UserID: 2,
-			Items: []model.CreateOrderItem{
-				{ProductID: 2, Quantity: 2},
+			wantErr: nil,
+			wantOrder: model.Order{
+				ID:         1,
+				UserID:     9,
+				TotalPrice: 500,
+				Status:     "new",
 			},
-		}
+		},
+	}
 
-		svc := NewOrderService(orderRepo, prodRepo)
-		order, err := svc.CreateOrder(context.Background(), req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prodRepo := &mockProductRepo{getByIDFn: tt.mockProdRepoFn}
+			orderRepo := &mockOrderRepo{createFullOrderFn: tt.mockOrderRepoFn}
 
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if order.ID != expectedOrder.ID || order.TotalPrice != expectedOrder.TotalPrice {
-			t.Errorf("got %+v, want %+v", order, expectedOrder)
-		}
-	})
+			svc := NewOrderService(orderRepo, prodRepo)
+
+			order, err := svc.CreateOrder(context.Background(), tt.req)
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
+			}
+
+			if tt.wantErr == nil && (order.ID != tt.wantOrder.ID || order.TotalPrice != tt.wantOrder.TotalPrice) {
+				t.Errorf("got order %+v, want %+v", order, tt.wantOrder)
+			}
+		})
+	}
 }
