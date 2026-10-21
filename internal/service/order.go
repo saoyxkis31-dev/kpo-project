@@ -4,14 +4,26 @@ import (
 	"Confetki/internal/model"
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 )
+
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("validation failed on %s: %s", e.Field, e.Message)
+}
 
 var ErrInvalidID = errors.New("invalid order id")
 var ErrOrderNotFound = errors.New("order not found")
 var ErrBadStatus = errors.New("bad status")
 var ErrProductNotFound = errors.New("product not found")
+var ErrEmptyOrderItems = errors.New("order must contain at least one item")
+var ErrInvalidQuantity = errors.New("item quantity must be greater than zero")
 
 type OrderRepository interface {
 	CreateFullOrder(ctx context.Context, order model.Order, items []model.OrderItem) (model.Order, error)
@@ -36,10 +48,20 @@ func NewOrderService(orderRepository OrderRepository, productRepository ProductR
 
 func (s *OrderService) CreateOrder(ctx context.Context, request model.CreateOrderRequest) (model.Order, error) {
 
+	if len(request.Items) == 0 {
+		return model.Order{}, ErrEmptyOrderItems
+	}
+
 	var totalPrice float64
 	var orderItems []model.OrderItem
 
 	for _, item := range request.Items {
+		if item.Quantity < 0 {
+			return model.Order{}, &ValidationError{
+				Field:   "quantity",
+				Message: fmt.Sprintf("item %d must be positive", item.ProductID),
+			}
+		}
 		product, err := s.productRepository.GetByID(ctx, item.ProductID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

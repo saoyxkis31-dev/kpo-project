@@ -12,7 +12,7 @@ type AuthHandler struct {
 
 func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 	return &AuthHandler{
-		authService: 	authService,
+		authService: authService,
 	}
 }
 
@@ -39,14 +39,12 @@ func (a *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
 	json.NewEncoder(w).Encode(user)
 }
 
-
 type LoginRequest struct {
-    Email    string `json:"email"`
-    Password string `json:"password"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 func (a *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {

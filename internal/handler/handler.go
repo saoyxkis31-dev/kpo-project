@@ -157,6 +157,13 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	createdOrder, err := h.orderService.CreateOrder(r.Context(), request)
 	if err != nil {
+		var valErr *service.ValidationError
+
+		if errors.As(err, &valErr) {
+			http.Error(w, valErr.Message, http.StatusInternalServerError)
+			return
+		}
+
 		if errors.Is(err, repository.ErrNotEnoughProduct) {
 			http.Error(w, "not enough product", http.StatusBadRequest)
 			return
@@ -165,6 +172,15 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "product not found", http.StatusBadRequest)
 			return
 		}
+		if errors.Is(err, service.ErrInvalidQuantity) {
+			http.Error(w, "quantity <0 ", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrEmptyOrderItems) {
+			http.Error(w, "empty order items", http.StatusBadRequest)
+			return
+		}
+
 		http.Error(w, "failed to create order", http.StatusInternalServerError)
 		return
 	}
