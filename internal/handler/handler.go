@@ -229,6 +229,13 @@ func (h *Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(order)
 }
 
+// GetAllOrders godoc
+// @Summary      Получить список заказов
+// @Tags         orders
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {array}   model.Order
+// @Router       /api/orders [get]
 func (h *Handler) GetAllOrders(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -10,7 +11,18 @@ import (
 var ErrInvalidToken = errors.New("invalid token")
 var ErrUnexpectedMethod = errors.New("unexpected signing method")
 
-var jwtSecret = []byte("gadji_i_demik_loxi")
+var jwtSecret []byte
+
+// инициализирует секрет  строку при старте программы
+func Init() {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		panic("JWT_SECRET is empty")
+	}
+
+	jwtSecret = []byte(secret)
+
+}
 
 type Claims struct {
 	UserID int    `json:"user_id"`

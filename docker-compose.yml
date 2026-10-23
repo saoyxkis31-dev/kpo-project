@@ -1,27 +1,52 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:16-alpine
-    restart: always
     environment:
-      POSTGRES_USER: sekisq3l
-      POSTGRES_PASSWORD: 3110_step
-      POSTGRES_DB: confetki
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  api:
+  migrate:
+    image: migrate/migrate
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=disable
+      - up
+    depends_on:
+      db:
+        condition: service_healthy
+
+
+
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  app:
     build: .
     ports:
       - "8080:8080"
     environment:
-      # вместо localhost пишем имя контейнера базы данных  db
-      CONN_STRING: "postgres://sekisq3l:3110_step@db:5432/confetki?sslmode=disable"
+      - CONN_STRING=${CONN_STRING}
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_ADDR=${REDIS_ADDR}
     depends_on:
-      - db
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
 volumes:
   pgdata:

@@ -34,3 +34,14 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func AdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userRole, ok := r.Context().Value(RoleKey).(string)
+		if !ok || userRole != "admin" {
+			http.Error(w, "access denied: admin only", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
